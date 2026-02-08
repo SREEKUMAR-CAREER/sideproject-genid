@@ -1,0 +1,78 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isAdmin() {
+      return isSignedIn() && 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+    
+    function belongsToCompany(companyId) {
+      return isSignedIn() && 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.companyId == companyId;
+    }
+    
+    function hasActiveSubscription(companyId) {
+      let company = get(/databases/$(database)/documents/companies/$(companyId)).data;
+      return company.subscription.status == 'active' && 
+             company.subscription.endDate > request.time;
+    }
+    
+    // Users collection
+    match /users/{userId} {
+      allow read: if isSignedIn() && request.auth.uid == userId;
+      allow create: if isSignedIn();
+      allow update: if isSignedIn() && request.auth.uid == userId;
+      allow delete: if false;
+    }
+    
+    // Companies collection
+    match /companies/{companyId} {
+      allow read: if belongsToCompany(companyId);
+      allow create: if isSignedIn() && isAdmin();
+      allow update: if belongsToCompany(companyId) && isAdmin();
+      allow delete: if false;
+    }
+    
+    // Templates collection
+    match /templates/{templateId} {
+      allow read: if belongsToCompany(resource.data.companyId);
+      allow create: if isSignedIn() && 
+                      isAdmin() && 
+                      hasActiveSubscription(request.resource.data.companyId);
+      allow update: if belongsToCompany(resource.data.companyId) && isAdmin();
+      allow delete: if belongsToCompany(resource.data.companyId) && isAdmin();
+    }
+    
+    // Forms collection
+    match /forms/{formId} {
+      allow read: if true; // Public forms
+      allow create: if isSignedIn() && 
+                      isAdmin() && 
+                      hasActiveSubscription(request.resource.data.companyId);
+      allow update: if belongsToCompany(resource.data.companyId) && isAdmin();
+      allow delete: if belongsToCompany(resource.data.companyId) && isAdmin();
+    }
+    
+    // Submissions collection
+    match /submissions/{submissionId} {
+      allow read: if belongsToCompany(resource.data.companyId);
+      allow create: if true; // Anyone can submit form
+      allow update: if belongsToCompany(resource.data.companyId) && isAdmin();
+      allow delete: if false;
+    }
+    
+    // Generated cards collection
+    match /generatedCards/{cardId} {
+      allow read: if belongsToCompany(resource.data.companyId);
+      allow create: if isSignedIn();
+      allow update: if belongsToCompany(resource.data.companyId);
+      allow delete: if false;
+    }
+  }
+}
